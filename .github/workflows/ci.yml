@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  LUAU_VERSION: "0.738"
+  LUAU_LSP_VERSION: "1.69.0"
+  # stencil-hq/tern-sdk commit whose plugins/tern.d.luau the code is checked against
+  TERN_SDK_SHA: 3627b34350935c44cb89f6e793e95ad3d08ad75a
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install luau and luau-lsp
+        run: |
+          mkdir -p "$HOME/bin"
+          gh release download "$LUAU_VERSION" --repo luau-lang/luau --pattern luau-ubuntu.zip --dir /tmp/luau
+          gh release download "$LUAU_LSP_VERSION" --repo JohnnyMorganz/luau-lsp --pattern luau-lsp-linux-x86_64.zip --dir /tmp/lsp
+          unzip -q /tmp/luau/luau-ubuntu.zip -d /tmp/luau
+          unzip -q /tmp/lsp/luau-lsp-linux-x86_64.zip -d /tmp/lsp
+          install -m 755 /tmp/luau/luau "$HOME/bin/luau"
+          install -m 755 /tmp/lsp/luau-lsp "$HOME/bin/luau-lsp"
+          echo "$HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Tern type definitions
+        run: |
+          mkdir -p types
+          gh api "repos/stencil-hq/tern-sdk/contents/plugins/tern.d.luau?ref=${TERN_SDK_SHA}" --jq .content | base64 -d > types/tern.d.luau
+
+      - name: Type check
+        run: luau-lsp analyze --platform=standard --definitions=@tern=types/tern.d.luau window.luau lib
+
+      - name: Unit tests
+        run: luau tests/run.luau
+
+      - name: serve.pl tests
+        run: bash tests/serve.sh
+
+      - name: Tests can fail (neuter harness)
+        run: python3 scripts/neuter.py
+
+      - name: Tests can fail (serve.pl)
+        run: python3 scripts/neuter_serve.py
