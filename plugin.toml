@@ -1,0 +1,6 @@
+schema = 1
+id = "remote-open"
+name = "Remote Open"
+version = "0.1.0"
+description = "Open remote files, localhost links and OAuth loopback sign-ins from remote panes, over ssh."
+window = "window.luau"
