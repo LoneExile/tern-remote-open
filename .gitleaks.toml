@@ -1,0 +1,11 @@
+title = "remote-open"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fake URL tokens used as test fixtures (the RFC 4122 example UUID and a counting sequence); nothing secret."
+regexes = [
+  '''3f2504e04f8911d39a0c0305e82c3301''',
+  '''0123456789abcdef0123456789abcdef''',
+]
