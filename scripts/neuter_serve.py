@@ -5,13 +5,22 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 src = open(ROOT + "/serve.pl").read()
 M = [
     ("host-check", 'unless ($host eq "127.0.0.1:$port" || $host eq "localhost:$port") {', "unless (1) {"),
-    ("token-path", 'unless ($path eq "/$token/$name") {', "unless (1) {"),
+    ("token-path", "unless ($path eq $raw) {", "unless (1) {"),
     ("method", "unless ($method eq 'GET' || $method eq 'HEAD') {", "unless (1) {"),
     ("head-body", "if ($method eq 'GET') {", "if (1) {"),
     ("bind-all", "LocalAddr => '127.0.0.1',", "LocalAddr => '0.0.0.0',"),
     ("nosniff", '"X-Content-Type-Options: nosniff\\r\\n"', '""'),
     ("idle-exit", "while ($select->can_read($idle)) {", "while (1) { $select->can_read($idle);"),
     ("token-arg", "$token =~ /^[0-9a-f]{32}\\z/", "1"),
+    # the image viewer
+    ("viewer-type", "$type =~ m{^image/(?:png|jpeg|gif|webp)\\z}", "1"),
+    ("post-header", "($header{'x-remote-open'} // '') eq '1'", "1"),
+    ("post-origin", "!defined $origin ||", "1 ||"),
+    ("post-only", "unless ($method eq 'POST') {", "unless (1) {"),
+    ("raw-path", 'my $raw = $viewer ? "/$token/raw/$name" : "/$token/$name";', 'my $raw = "/$token/$name";'),
+    ("copy-file", "exec { $copier[0] } @copier, $file", "exec { $copier[0] } @copier"),
+    ("copy-status", "if ($status == 0) {", "if (1) {"),
+    ("save-excl", "O_WRONLY | O_CREAT | O_EXCL", "O_WRONLY | O_CREAT"),
 ]
 bad = 0
 for ident, old, new in M:

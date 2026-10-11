@@ -196,4 +196,49 @@ h.test("host names in plans are cleaned for toasts", function()
 	h.eq(p.host_name, "dev [31mbox")
 end)
 
+local function open(path, opts, hosts, c)
+	opts = opts or {}
+	return classify.plan_open(
+		{ path = path, host = opts.host or "devbox", how = "default", origin = opts.origin or "link" },
+		hosts or { fakes.host() },
+		c or DEFAULT
+	)
+end
+
+h.test("open: an image path clicked on a connected remote host is the same file plan as its file:// link", function()
+	for _, ext in { "png", "jpg", "jpeg", "gif", "webp", "PNG" } do
+		local path = "/home/you/out/diagram." .. ext
+		local p = open(path)
+		h.eq(p, plan("file://" .. path), ext)
+		h.eq(p.kind, "file", ext)
+	end
+end)
+
+h.test("open: only clicks (origin link) are taken; the palette, Files, drops, the system, tern open and Carly are not", function()
+	for _, origin in { "palette", "files", "drop", "system", "cli", "carly" } do
+		h.eq(open("/home/you/a.png", { origin = origin }).kind, "pass", origin)
+	end
+end)
+
+h.test("open: pages, svg, pdf and other files stay Tern's", function()
+	for _, name in { "a.html", "a.svg", "a.pdf", "a.txt", "a", "a.png.bak" } do
+		h.eq(open("/home/you/" .. name).kind, "pass", name)
+	end
+end)
+
+h.test("open: a local, disconnected, unknown or ambiguous host passes, and so does a bad path", function()
+	h.eq(open("/tmp/a.png", {}, { fakes.host({ kind = "local", name = "devbox" }) }).kind, "pass", "local")
+	h.eq(open("/tmp/a.png", {}, { fakes.host({ state = "reconnecting" }) }).kind, "pass", "disconnected")
+	h.eq(open("/tmp/a.png", { host = "elsewhere" }).kind, "pass", "unknown host")
+	h.eq(open("/tmp/a.png", {}, { fakes.host(), fakes.host({ id = 2, address = "me@devbox2" }) }).kind, "pass", "two hosts named devbox")
+	h.eq(open("tmp/a.png").kind, "pass", "relative")
+	h.eq(open("/tmp/a\n.png").kind, "pass", "control character")
+end)
+
+h.test("open: no usable ssh target gives no_target", function()
+	local p = open("/tmp/a.png", {}, { fakes.host({ address = "you@devbox:8376" }) })
+	h.eq(p.kind, "no_target")
+	h.eq(p.host_name, "devbox")
+end)
+
 return {}

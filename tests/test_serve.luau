@@ -95,6 +95,43 @@ h.test("each content type is passed for its extension", function()
 	end
 end)
 
+h.test("an image with a downloads directory and a copier is served in the viewer", function()
+	local copier = argv.copier("/plugin/copy-image.js")
+	for _, ext in { "png", "jpg", "jpeg", "gif", "webp" } do
+		local env = env_for({ uuidgen = ok({ stdout = UUID }), serve = fakes.HOLD })
+		env.randoms = { 50123 }
+		local got = start(env, {
+			script = "/plugin/serve.pl", file = "/d/x." .. ext, name = "x." .. ext, ext = ext,
+			downloads = "/Users/you/Downloads", copier = copier,
+		})
+		h.eq(env.log[2].argv, argv.serve({
+			script = "/plugin/serve.pl", port = 50123, token = TOKEN, file = "/d/x." .. ext, name = "x." .. ext,
+			content_type = serve.CONTENT_TYPES[ext], idle = 600, downloads = "/Users/you/Downloads", copier = copier,
+		}), ext)
+		h.eq(got[1].result.url, "http://127.0.0.1:50123/" .. TOKEN .. "/x." .. ext, "the page sits where the file did")
+	end
+end)
+
+h.test("no viewer for a page, an svg or a pdf, nor for an image without its directory or copier", function()
+	local copier = argv.copier("/plugin/copy-image.js")
+	local cases = {
+		{ ext = "html", downloads = "/Users/you/Downloads", copier = copier },
+		{ ext = "svg", downloads = "/Users/you/Downloads", copier = copier },
+		{ ext = "pdf", downloads = "/Users/you/Downloads", copier = copier },
+		{ ext = "png", downloads = nil, copier = copier },
+		{ ext = "png", downloads = "/Users/you/Downloads", copier = nil },
+	}
+	for _, c in cases do
+		local env = env_for({ uuidgen = ok({ stdout = UUID }), serve = fakes.HOLD })
+		local got = start(env, {
+			script = "/plugin/serve.pl", file = "/d/x." .. c.ext, name = "x." .. c.ext, ext = c.ext,
+			downloads = c.downloads, copier = c.copier,
+		})
+		h.eq(#env.log[2].argv, 8, c.ext)
+		h.eq(got[1].result.ok, true, c.ext)
+	end
+end)
+
 h.test("a port that is taken is retried on another one", function()
 	local env = env_for({
 		uuidgen = ok({ stdout = UUID }),

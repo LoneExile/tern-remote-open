@@ -2,6 +2,7 @@
 -- Deciding what a link click means. Pure: takes the link, the host list and the
 -- config, returns a plan. All effects happen in app.luau.
 
+local check = require("./check")
 local config = require("./config")
 local hostlib = require("./hosts")
 local serve = require("./serve")
@@ -72,6 +73,21 @@ local function open_url_for(input: string, parsed: url.Parsed): string
 	return string.format("%s://127.0.0.1:%d%s", parsed.scheme, parsed.port or 0, rest)
 end
 
+-- The plan for fetching `file_path` from `host` over `target`.
+local function file_plan(host: ManagedHost, target: string, file_path: string): Plan
+	local base = string.match(file_path, "([^/]*)$") or "file"
+	local name = text.safe_name(base, MAX_NAME)
+	return {
+		kind = "file",
+		host_name = text.clean(host.name, 60),
+		target = target,
+		path = file_path,
+		name = name,
+		cache_name = text.hash8(host.name .. "\0" .. file_path) .. "-" .. name,
+		ext = extension(file_path),
+	}
+end
+
 -- `link` is what Tern passed to the route; `host_list` is `cx.hosts:list()`.
 function classify.plan(link: Link, host_list: { ManagedHost }, cfg: config.Config): Plan
 	-- Not from a pane, or ⌥ held: Tern's normal handling.
@@ -114,17 +130,7 @@ function classify.plan(link: Link, host_list: { ManagedHost }, cfg: config.Confi
 	end
 
 	if kind == "file" and file_path ~= nil then
-		local base = string.match(file_path, "([^/]*)$") or "file"
-		local name = text.safe_name(base, MAX_NAME)
-		return {
-			kind = "file",
-			host_name = host_name,
-			target = target,
-			path = file_path,
-			name = name,
-			cache_name = text.hash8(host.name .. "\0" .. file_path) .. "-" .. name,
-			ext = extension(file_path),
-		}
+		return file_plan(host, target, file_path)
 	end
 
 	if loopback ~= nil and loopback.port ~= nil and loopback.host ~= nil then
@@ -149,6 +155,25 @@ function classify.plan(link: Link, host_list: { ManagedHost }, cfg: config.Confi
 		}
 	end
 	return PASS
+end
+
+-- A file open (`tern.route.open`): an image path clicked in a pane of a
+-- connected remote host (origin `link`: a path printed in a terminal, or a file
+-- link no link route claimed) is fetched and shown in the image viewer. Every
+-- other open, and any image opened another way, is left to Tern.
+function classify.plan_open(req: OpenRequest, host_list: { ManagedHost }, cfg: config.Config): Plan
+	if req.origin ~= "link" or not serve.VIEWER[extension(req.path)] or not check.abs_path(req.path) then
+		return PASS
+	end
+	local host = hostlib.host_named(host_list, req.host)
+	if not host or not hostlib.eligible(host) then
+		return PASS
+	end
+	local target = targetlib.choose(host, cfg)
+	if target == nil then
+		return { kind = "no_target", host_name = text.clean(host.name, 60) }
+	end
+	return file_plan(host, target, req.path)
 end
 
 return classify

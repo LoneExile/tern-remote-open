@@ -16,6 +16,21 @@ function hosts.host_for_pane(list: { ManagedHost }, pane: number): ManagedHost?
 	return nil
 end
 
+-- The one host named `name` (a file open names its host, not a pane), or nil:
+-- no host, or two of that name, which would make the choice a guess.
+function hosts.host_named(list: { ManagedHost }, name: string): ManagedHost?
+	local found: ManagedHost? = nil
+	for _, host in list do
+		if host.name == name then
+			if found ~= nil then
+				return nil
+			end
+			found = host
+		end
+	end
+	return found
+end
+
 -- A remote host with a live connection. Anything else (local, connecting,
 -- stalled, reconnecting, failed, unverified) is left to Tern.
 function hosts.eligible(host: ManagedHost?): boolean

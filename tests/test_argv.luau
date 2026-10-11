@@ -162,4 +162,49 @@ h.test("serve: refuses a bad port, token, name, type, idle, path", function()
 	h.raises(function() argv.serve(with("file", "/d/a\nb.html")) end)
 end)
 
+h.test("copier: osascript runs copy-image.js as JavaScript; the file comes last, from serve.pl", function()
+	h.eq(argv.copier("/plugin/copy-image.js"), { "/usr/bin/osascript", "-l", "JavaScript", "/plugin/copy-image.js" })
+	h.raises(function() argv.copier("copy-image.js") end)
+	h.raises(function() argv.copier("/p/a\nb.js") end)
+end)
+
+h.test("serve: the viewer appends the downloads directory, then the copier", function()
+	local copier = argv.copier("/plugin/copy-image.js")
+	h.eq(argv.serve({
+		script = "/plugin/serve.pl", port = 50123, token = TOKEN32, file = "/data/cache/ab-x.png",
+		name = "x.png", content_type = "image/png", idle = 600,
+		downloads = "/Users/you/Downloads", copier = copier,
+	}), {
+		"/usr/bin/perl", "/plugin/serve.pl", "50123", TOKEN32, "/data/cache/ab-x.png", "x.png", "image/png", "600",
+		"/Users/you/Downloads", "/usr/bin/osascript", "-l", "JavaScript", "/plugin/copy-image.js",
+	})
+end)
+
+h.test("serve: refuses a half viewer, a viewer of a non-image, and a bad directory or copier", function()
+	local base = {
+		script = "/p/serve.pl", port = 50000, token = TOKEN32, file = "/d/x.png", name = "x.png",
+		content_type = "image/png", idle = 600, downloads = "/Users/you/Downloads", copier = { "/usr/bin/osascript", "-l", "JavaScript", "/p/c.js" },
+	}
+	local function with(k, v)
+		local c = table.clone(base)
+		c[k] = v
+		return c
+	end
+	h.eq(#argv.serve(base), 13)
+	for _, ctype in { "image/jpeg", "image/gif", "image/webp" } do
+		h.eq(#argv.serve(with("content_type", ctype)), 13, ctype)
+	end
+	h.raises(function() argv.serve(with("downloads", nil)) end, "a copier without a directory")
+	h.raises(function() argv.serve(with("copier", nil)) end, "a directory without a copier")
+	for _, ctype in { "image/svg+xml", "application/pdf", "text/html; charset=utf-8" } do
+		h.raises(function() argv.serve(with("content_type", ctype)) end, ctype)
+	end
+	h.raises(function() argv.serve(with("downloads", "Downloads")) end)
+	h.raises(function() argv.serve(with("downloads", "/Users/you/Down\nloads")) end)
+	h.raises(function() argv.serve(with("copier", {})) end)
+	h.raises(function() argv.serve(with("copier", { "osascript", "/p/c.js" })) end, "a relative binary")
+	h.raises(function() argv.serve(with("copier", { "/usr/bin/osascript", "/p/c\n.js" })) end)
+	h.raises(function() argv.serve(with("copier", { "/usr/bin/osascript", "" })) end)
+end)
+
 return {}

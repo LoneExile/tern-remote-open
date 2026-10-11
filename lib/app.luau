@@ -1,9 +1,11 @@
 --!strict
 -- The effects: toasts, processes, opening pages. `install` registers the link
--- route and the two palette commands; every decision is made by the pure
--- modules, every slow step runs in a callback, so no handler nears Tern's 50 ms.
+-- and open routes and the two palette commands; every decision is made by the
+-- pure modules, every slow step runs in a callback, so no handler nears Tern's
+-- 50 ms.
 
 local argv = require("./argv")
+local check = require("./check")
 local classify = require("./classify")
 local config = require("./config")
 local forward = require("./forward")
@@ -117,6 +119,13 @@ local function open_copy(ctx: Ctx, cx: WindowCx, copy: string, name: string, ext
 		end)
 	end
 	local request: serve.Request = { script = ctx.t.plugin.dir .. "/serve.pl", file = copy, name = name, ext = ext }
+	-- An image gets the viewer: Save copies it into ~/Downloads, Copy puts it on
+	-- the clipboard. Without a usable HOME there is no Downloads, so no viewer.
+	local home = ctx.t.getenv("HOME")
+	if serve.VIEWER[ext] and home ~= nil and check.abs_path(home) then
+		request.downloads = home .. "/Downloads"
+		request.copier = argv.copier(ctx.t.plugin.dir .. "/copy-image.js")
+	end
 	serve.start(ctx.env, request, cx, function(result: serve.Result, cx2: WindowCx?)
 		local page = result.url
 		if result.ok and page ~= nil and cx2 ~= nil then
@@ -241,10 +250,8 @@ local function start_forward(ctx: Ctx, cfg: config.Config, plan: classify.Plan, 
 	end)
 end
 
-local function on_link(ctx: Ctx, link: LinkRequest, cx: WindowCx): RouteDecision?
-	local cfg = app.load_config(ctx.t)
-	local plan = classify.plan(link, cx.hosts:list(), cfg)
-
+-- Carries out a plan; the route's decision.
+local function act(ctx: Ctx, cfg: config.Config, plan: classify.Plan, cx: WindowCx): RouteDecision?
 	if plan.kind == "pass" then
 		return nil
 	elseif plan.kind == "no_target" then
@@ -265,6 +272,16 @@ local function on_link(ctx: Ctx, link: LinkRequest, cx: WindowCx): RouteDecision
 		start_forward(ctx, cfg, plan, cx)
 		return { handled = true }
 	end
+end
+
+local function on_link(ctx: Ctx, link: LinkRequest, cx: WindowCx): RouteDecision?
+	local cfg = app.load_config(ctx.t)
+	return act(ctx, cfg, classify.plan(link, cx.hosts:list(), cfg), cx)
+end
+
+local function on_open(ctx: Ctx, req: OpenRequest, cx: WindowCx): RouteDecision?
+	local cfg = app.load_config(ctx.t)
+	return act(ctx, cfg, classify.plan_open(req, cx.hosts:list(), cfg), cx)
 end
 
 local function describe(listing: forward.Listing, now: number): string
@@ -309,13 +326,16 @@ local function stop_forwards(ctx: Ctx, cx: WindowCx)
 	end)
 end
 
--- Registers the plugin on `t`: the link route, the two commands, and the
--- load-time housekeeping (forget dead forwards, age out old cached copies).
+-- Registers the plugin on `t`: the link and open routes, the two commands, and
+-- the load-time housekeeping (forget dead forwards, age out old cached copies).
 function app.install(t: Tern)
 	local ctx: Ctx = { t = t, env = app.make_env(t) }
 
 	t.route.link(function(link: LinkRequest, cx: WindowCx): RouteDecision?
 		return on_link(ctx, link, cx)
+	end)
+	t.route.open(function(req: OpenRequest, cx: WindowCx): RouteDecision?
+		return on_open(ctx, req, cx)
 	end)
 
 	t.command({

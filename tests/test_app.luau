@@ -42,7 +42,14 @@ local function setup(opts)
 		link = function(fn)
 			s.link = fn
 		end,
+		open = function(fn)
+			s.open = fn
+		end,
 	}
+	local env = opts.env or { HOME = "/Users/you" }
+	t.getenv = function(name)
+		return env[name]
+	end
 	s.commands = {}
 	t.command = function(def)
 		s.commands[def.id] = def
@@ -140,6 +147,17 @@ local function setup(opts)
 		return s.link(fakes.link(url, copts), s.new_cx())
 	end
 
+	-- A file open of `path` on host `host` (default: the fake remote host).
+	function s.open_file(path, oopts)
+		oopts = oopts or {}
+		return s.open({
+			path = path,
+			host = oopts.host or "devbox",
+			how = "default",
+			origin = oopts.origin or "link",
+		}, s.new_cx())
+	end
+
 	-- Answers every pending process and timer until quiet. `responses` maps a
 	-- command kind to a result or a function(argv, n). A server process is held
 	-- (it runs until idle) unless the test gives it a result.
@@ -197,9 +215,10 @@ end
 local FREE = { status = 1, stdout = "", stderr = "", timed_out = false }
 local DEAD = { status = 255, stdout = "", stderr = "no master", timed_out = false }
 
-h.test("install registers one link route and the two commands, and touches no process on an empty state", function()
+h.test("install registers a link route, an open route and the two commands, and touches no process on an empty state", function()
 	local s = setup()
 	h.truthy(s.link, "route.link handler")
+	h.truthy(s.open, "route.open handler")
 	h.eq(s.commands.stop.title, "Remote Open: Stop forwards")
 	h.eq(s.commands.list.title, "Remote Open: List forwards")
 	h.eq(#s.procs, 0)
@@ -331,6 +350,80 @@ h.test("file: other extensions go to Tern untouched", function()
 	local s = setup()
 	h.eq(s.click("file:///home/you/notes.txt"), nil)
 	h.eq(#s.toasts, 0)
+	h.eq(#s.procs, 0)
+end)
+
+local COPIER = { "/usr/bin/osascript", "-l", "JavaScript", "/plugin/copy-image.js" }
+
+-- The tail serve.pl gets for the viewer, or nil when it was started without one.
+local function viewer_args(serve_argv)
+	if #serve_argv == 8 then
+		return nil
+	end
+	return table.move(serve_argv, 9, #serve_argv, 1, {})
+end
+
+h.test("image: served in the viewer, Save into ~/Downloads, Copy by copy-image.js; the page opens as before", function()
+	local s = setup()
+	h.eq(s.click("file:///home/you/out/diagram.png"), { handled = true })
+	s.drain()
+	h.eq(s.kinds(), { "scp", "uuidgen", "serve", "nc" })
+	h.eq(viewer_args(s.ran[3]), { "/Users/you/Downloads", table.unpack(COPIER) })
+	local port = tonumber(s.ran[3][3])
+	h.eq(s.opened, { serve.url(port, TOKEN, "diagram.png") })
+end)
+
+h.test("image: every raster type gets the viewer; pages, svg and pdf do not", function()
+	for _, ext in { "png", "jpg", "jpeg", "gif", "webp" } do
+		local s = setup()
+		s.click("file:///home/you/x." .. ext)
+		s.drain()
+		h.eq(viewer_args(s.ran[3]), { "/Users/you/Downloads", table.unpack(COPIER) }, ext)
+	end
+	for _, ext in { "html", "svg", "pdf" } do
+		local s = setup()
+		s.click("file:///home/you/x." .. ext)
+		s.drain()
+		h.eq(viewer_args(s.ran[3]), nil, ext)
+	end
+end)
+
+h.test("image: no usable HOME, no Downloads: the bare image, as before", function()
+	for _, env in { {}, { HOME = "relative" }, { HOME = "/Users/a\nb" } } do
+		local s = setup({ env = env })
+		s.click("file:///home/you/x.png")
+		s.drain()
+		h.eq(viewer_args(s.ran[3]), nil, tostring(env.HOME))
+		h.eq(#s.opened, 1)
+	end
+end)
+
+h.test("open: an image path clicked in a remote pane is fetched and shown in the viewer", function()
+	local s = setup()
+	h.eq(s.open_file("/home/you/out/diagram.png"), { handled = true })
+	h.eq(s.toasts[1].title, "Fetching diagram.png…")
+	local plan = classify.plan(fakes.link("file:///home/you/out/diagram.png"), s.hosts, { hosts = {} })
+	h.eq(s.procs[1].argv, argv.scp("you@devbox", "/home/you/out/diagram.png", "/data/cache/" .. plan.cache_name))
+	s.drain()
+	h.eq(s.kinds(), { "scp", "uuidgen", "serve", "nc" })
+	h.eq(viewer_args(s.ran[3]), { "/Users/you/Downloads", table.unpack(COPIER) })
+	h.eq(#s.opened, 1)
+end)
+
+h.test("open: other opens are Tern's, untouched", function()
+	local s = setup()
+	h.eq(s.open_file("/home/you/a.png", { origin = "palette" }), nil)
+	h.eq(s.open_file("/home/you/a.html"), nil)
+	h.eq(s.open_file("/home/you/a.png", { host = "Local" }), nil)
+	h.eq(#s.toasts, 0)
+	h.eq(#s.procs, 0)
+end)
+
+h.test("open: no usable ssh target is a toast, then Tern's own open", function()
+	local s = setup({ hosts = { fakes.host({ address = "you@devbox:8376" }) } })
+	h.eq(s.open_file("/home/you/a.png"), nil)
+	h.eq(s.toasts[1].level, "error")
+	h.eq(s.toasts[1].title, "No SSH target for devbox")
 	h.eq(#s.procs, 0)
 end)
 

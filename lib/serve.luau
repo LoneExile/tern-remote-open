@@ -35,6 +35,10 @@ serve.CONTENT_TYPES = {
 	webp = "image/webp",
 }
 
+-- Extensions shown in `serve.pl`'s image viewer (Copy and Save buttons) when the
+-- request carries a downloads directory and a copier.
+serve.VIEWER = { png = true, jpg = true, jpeg = true, gif = true, webp = true }
+
 function serve.url(port: number, token: string, name: string): string
 	return string.format("http://127.0.0.1:%d/%s/%s", port, token, name)
 end
@@ -57,6 +61,10 @@ export type Request = {
 	name: string,
 	-- The lowercase extension, a key of `serve.CONTENT_TYPES`.
 	ext: string,
+	-- The viewer's Save directory and Copy command (`argv.copier`); either nil
+	-- (or an extension the viewer does not show) serves the bare file.
+	downloads: string?,
+	copier: { string }?,
 }
 
 export type Result = { ok: boolean, url: string?, detail: string? }
@@ -71,6 +79,8 @@ function serve.start(env: forward.Env, req: Request, cx: WindowCx?, done: (Resul
 		return
 	end
 
+	local viewer = serve.VIEWER[req.ext] == true and req.downloads ~= nil and req.copier ~= nil
+
 	local function attempt(n: number, token: string, cx2: WindowCx?)
 		local port = env.random(PORT_LOW, PORT_HIGH)
 		local built, cmd = pcall(argv.serve, {
@@ -81,6 +91,8 @@ function serve.start(env: forward.Env, req: Request, cx: WindowCx?, done: (Resul
 			name = req.name,
 			content_type = content_type,
 			idle = serve.IDLE,
+			downloads = if viewer then req.downloads else nil,
+			copier = if viewer then req.copier else nil,
 		})
 		if not built then
 			done({ ok = false, detail = text.clean(tostring(cmd), 120) }, cx2)

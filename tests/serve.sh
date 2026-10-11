@@ -36,9 +36,9 @@ TOKEN=0123456789abcdef0123456789abcdef
 printf '<!doctype html><title>t</title><p>hello</p>\n' > "$tmp/page.html"
 head -c 300000 /dev/urandom > "$tmp/blob.png"
 
-start() { # file name type idle -> sets PORT, PID
+start() { # file name type idle [downloads copier...] -> sets PORT, PID
   PORT="$(free_port)"
-  "$PERL" "$SERVE" "$PORT" "$TOKEN" "$1" "$2" "$3" "$4" >/dev/null 2>&1 &
+  "$PERL" "$SERVE" "$PORT" "$TOKEN" "$@" >/dev/null 2>&1 &
   PID=$!
   pids+=("$PID")
   for _ in $(seq 1 50); do
@@ -112,6 +112,78 @@ kill "$PID" 2>/dev/null
 start "$tmp/blob.png" blob.png image/png 60
 expect "binary GET: 200" 200 "$(get "http://127.0.0.1:$PORT/$TOKEN/blob.png")"
 cmp -s "$tmp/out" "$tmp/blob.png" && ok || bad "binary GET: bytes are identical"
+kill "$PID" 2>/dev/null
+
+# --- the image viewer -----------------------------------------------------------
+# The copier is a stub that records its arguments, and fails while $tmp/copier-fails exists.
+mkdir -p "$tmp/dl"
+cat > "$tmp/copier.sh" <<EOF
+printf '%s\n' "\$@" > "$tmp/copied"
+[ ! -e "$tmp/copier-fails" ]
+EOF
+COPIER=(/bin/sh "$tmp/copier.sh")
+"$PERL" "$SERVE" 40001 "$TOKEN" "$tmp/page.html" page.html "text/html; charset=utf-8" 5 "$tmp/dl" "${COPIER[@]}" >/dev/null 2>&1
+expect "viewer of a page: exit 64" 64 $?
+"$PERL" "$SERVE" 40001 "$TOKEN" "$tmp/blob.png" blob.png image/svg+xml 5 "$tmp/dl" "${COPIER[@]}" >/dev/null 2>&1
+expect "viewer of an svg: exit 64" 64 $?
+"$PERL" "$SERVE" 40001 "$TOKEN" "$tmp/blob.png" blob.png image/png 5 dl "${COPIER[@]}" >/dev/null 2>&1
+expect "viewer, relative downloads: exit 64" 64 $?
+"$PERL" "$SERVE" 40001 "$TOKEN" "$tmp/blob.png" blob.png image/png 5 "$tmp/dl" >/dev/null 2>&1
+expect "viewer without a copier: exit 64" 64 $?
+"$PERL" "$SERVE" 40001 "$TOKEN" "$tmp/blob.png" blob.png image/png 5 "$tmp/dl" sh "$tmp/copier.sh" >/dev/null 2>&1
+expect "viewer, relative copier: exit 64" 64 $?
+
+start "$tmp/blob.png" blob.png image/png 60 "$tmp/dl" "${COPIER[@]}"
+vbase="http://127.0.0.1:$PORT/$TOKEN"
+post() { # path [curl args...]
+  local p=$1; shift
+  curl -s --max-time 8 -o "$tmp/out" -w '%{http_code}' -X POST "$@" "$vbase/$p"
+}
+
+expect "viewer page: 200" 200 "$(get "$vbase/blob.png")"
+grep -q 'src="raw/blob.png"' "$tmp/out" && ok || bad "viewer page: shows raw/NAME"
+grep -q 'Copy image' "$tmp/out" && grep -q 'Save to Downloads' "$tmp/out" && ok || bad "viewer page: has both buttons"
+vhdr="$(curl -s --max-time 8 -D - -o /dev/null "$vbase/blob.png" | tr -d '\r')"
+case "$vhdr" in *"Content-Type: text/html; charset=utf-8"*) ok ;; *) bad "viewer page: content type" ;; esac
+case "$vhdr" in *"Content-Security-Policy: default-src 'none'"*) ok ;; *) bad "viewer page: CSP" ;; esac
+expect "viewer raw image: 200" 200 "$(get "$vbase/raw/blob.png")"
+cmp -s "$tmp/out" "$tmp/blob.png" && ok || bad "viewer raw image: bytes are identical"
+rhdr="$(curl -s --max-time 8 -D - -o /dev/null "$vbase/raw/blob.png" | tr -d '\r')"
+case "$rhdr" in *"Content-Type: image/png"*) ok ;; *) bad "viewer raw image: content type" ;; esac
+expect "viewer, other raw name: 404" 404 "$(get "$vbase/raw/other.png")"
+expect "viewer, POST to the page: 405" 405 "$(post blob.png -H 'X-Remote-Open: 1')"
+expect "viewer, GET of copy: 405" 405 "$(get "$vbase/copy")"
+expect "viewer, GET of save: 405" 405 "$(get "$vbase/save")"
+
+rm -f "$tmp/copied"
+expect "copy: 200" 200 "$(post copy -H 'X-Remote-Open: 1' -H "Origin: http://127.0.0.1:$PORT")"
+expect "copy: answers ok" '{"ok":true}' "$(cat "$tmp/out")"
+expect "copy: the copier got the file" "$tmp/blob.png" "$(cat "$tmp/copied" 2>/dev/null)"
+rm -f "$tmp/copied"
+expect "copy without the header: 403" 403 "$(post copy)"
+expect "copy from another origin: 403" 403 "$(post copy -H 'X-Remote-Open: 1' -H 'Origin: http://evil.example')"
+expect "copy from another port: 403" 403 "$(post copy -H 'X-Remote-Open: 1' -H "Origin: http://127.0.0.1:$((PORT + 1))")"
+expect "copy with a foreign Host: 421" 421 "$(post copy -H 'X-Remote-Open: 1' -H 'Host: evil.example')"
+[ ! -e "$tmp/copied" ] && ok || bad "refused copies never ran the copier"
+touch "$tmp/copier-fails"
+expect "a failing copier: 500" 500 "$(post copy -H 'X-Remote-Open: 1')"
+grep -q '"ok":false' "$tmp/out" && ok || bad "a failing copier: answers not ok"
+rm -f "$tmp/copier-fails"
+
+expect "save: 200" 200 "$(post save -H 'X-Remote-Open: 1')"
+expect "save: answers the name" '{"ok":true,"name":"blob.png"}' "$(cat "$tmp/out")"
+cmp -s "$tmp/dl/blob.png" "$tmp/blob.png" && ok || bad "save: bytes are identical"
+printf 'mine' > "$tmp/dl/blob (2).png"
+expect "save again: 200" 200 "$(post save -H 'X-Remote-Open: 1')"
+expect "save again: a name no file has" '{"ok":true,"name":"blob (3).png"}' "$(cat "$tmp/out")"
+cmp -s "$tmp/dl/blob (3).png" "$tmp/blob.png" && ok || bad "save again: bytes are identical"
+cmp -s "$tmp/dl/blob.png" "$tmp/blob.png" && ok || bad "save again: the first copy is untouched"
+expect "save again: an existing file is untouched" mine "$(cat "$tmp/dl/blob (2).png")"
+expect "save without the header: 403" 403 "$(post save)"
+expect "save without the header: no new file" 3 "$(find "$tmp/dl" -type f | wc -l | tr -d ' ')"
+rm -rf "$tmp/dl"
+expect "save with no Downloads folder: 500" 500 "$(post save -H 'X-Remote-Open: 1')"
+grep -q 'no Downloads folder' "$tmp/out" && ok || bad "save with no Downloads folder: says so"
 kill "$PID" 2>/dev/null
 
 # --- the port is taken --------------------------------------------------------

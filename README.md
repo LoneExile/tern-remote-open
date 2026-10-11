@@ -9,13 +9,24 @@ over plain `ssh`:
 
 | You click | It does |
 | --- | --- |
-| `file://…` to `html htm svg pdf png jpg jpeg gif webp` | Copies the file with `scp` and shows it in Tern's browser block. |
+| `file://…` to `html htm svg pdf png jpg jpeg gif webp` | Copies the file with `scp` and shows it in Tern's browser block. An image (`png jpg jpeg gif webp`) opens in a small viewer with **Copy image** and **Save to Downloads** buttons. |
+| A `png jpg jpeg gif webp` path printed in a remote pane (no `file://`) | The same image viewer. |
 | `http(s)://localhost\|127.0.0.1\|[::1]:PORT/…` | Starts an `ssh -L` forward of PORT, waits for it, opens the link in Tern's browser block. |
 | An `http(s)` URL with `redirect_uri=http://localhost:PORT/…` (OAuth/OIDC loopback sign-in) | Starts a forward of PORT that **closes by itself after 10 minutes**, then opens the sign-in page as clicked. |
 
-It acts only when the click came from a pane of a **connected remote host** and **⌥ is not held**.
-Everything else (local panes, other links, other file types, a disconnected host) is left to Tern.
-Hold ⌥ to get Tern's normal handling of any link.
+It acts only when the click came from a pane of a **connected remote host** and, for links, **⌥ is
+not held**. Everything else (local panes, other links, other file types, a disconnected host) is left
+to Tern. Hold ⌥ to get Tern's normal handling of any link. A plain path carries no modifiers, so an
+image path is always shown in the viewer.
+
+In the image viewer:
+
+- **Copy image** puts the image on the macOS clipboard as PNG and TIFF, so ⌘V pastes it into Slack,
+  Mail, Notes, Preview and the like. A PNG goes on byte for byte; JPEG, GIF and WebP are converted to PNG.
+- **Save to Downloads** copies the file into `~/Downloads` under its own name, or `name (2).png`,
+  `name (3).png` … when that name is taken; an existing file is never written to. The status line
+  names the file.
+- Click the image to switch between fit-to-window and actual size.
 
 Palette commands: **Remote Open: List forwards**, **Remote Open: Stop forwards**.
 
@@ -77,8 +88,10 @@ click, so edits need no reload.
 
 ## How it works
 
-- **Handler.** One `tern.route.link` handler. It only classifies the link and starts work; every
-  slow step (scp, ssh, port probes) runs in a process callback, so the handler stays far under Tern's
+- **Handlers.** One `tern.route.link` handler and one `tern.route.open` handler. The open handler takes
+  only a click (origin `link`) on an image path of a connected remote host; it never sees the
+  palette, the Files pane, drops, `tern open` or the system. Both only classify and start work; every
+  slow step (scp, ssh, port probes) runs in a process callback, so a handler stays far under Tern's
   50 ms budget.
 - **Forwards.** `ssh -f -T -M -S <control dir>/<port>.sock -L 127.0.0.1:PORT:<localhost>:PORT …`.
   The ssh process is also a ControlMaster on that socket. The socket is how the plugin later asks
@@ -114,6 +127,13 @@ the toast says so. `serve.pl` answers only `GET`/`HEAD` for that one path, only 
 20 s limit, and exits after 10 minutes without a connection. A page is a single file: relative
 references to other files on the remote host do not resolve.
 
+For an image, `serve.pl` serves a viewer page at that path instead, the image itself at
+`/TOKEN/raw/NAME`, and two actions, `POST /TOKEN/copy` and `POST /TOKEN/save`, which it carries out on
+the Mac: Copy runs `osascript -l JavaScript copy-image.js FILE` (AppKit's pasteboard; a page cannot
+put an image on the clipboard itself), Save copies the file into `~/Downloads` with `O_EXCL`. Measured
+in Tern 0.7.2's browser block: the page loads, both buttons work, and a JPEG lands on the clipboard
+as PNG and TIFF.
+
 ## Security notes
 
 - A Tern plugin runs as you with no permission system. This one is small enough to read: `lib/`.
@@ -126,18 +146,27 @@ references to other files on the remote host do not resolve.
   loopback port, so a forward exposes the remote service on that port to local processes for as long
   as it runs. That is why OAuth forwards expire and why `allowed_ports` exists. The control sockets are
   mode 600.
+- The viewer's two actions answer only a `POST` carrying `X-Remote-Open: 1`, a header that a page of
+  another origin cannot send without a CORS preflight, which `serve.pl` never answers; an `Origin`, when
+  sent, must be the server's own. They act on the one file the server was started for, and Save never
+  overwrites a file. The page is static apart from the file name, which is `[A-Za-z0-9._-]`, under a
+  `Content-Security-Policy` that allows only its own inline code, its own image and its own origin.
 - The plugin acts only on a click you made, and only for a connected remote host. It never types into
   a pane (`cx:run` is not used) and logs no secrets (URLs, which may carry OAuth state, are not logged).
 
 ## Limitations
 
-- macOS only (`/usr/bin/open`, `nc`, `uuidgen`, the BSD `find`). Remote host: anything with an SSH server.
+- macOS only (`/usr/bin/open`, `nc`, `uuidgen`, `osascript`, the BSD `find`). Remote host: anything with an SSH server.
 - ⌘-click in Tern follows `link_target`; set it to `"Tern"` to get the browser block. With `"Browser"`,
   the page opens in your default browser (a loopback URL there still works).
 - OAuth URLs that your terminal soft-wraps over several rows may reach Tern cut; that is a link
   detection matter outside this plugin (not tested here).
 - A web page is one file (see above). PDFs load in the browser block; the test suite checks that they
-  load without error, not how they look.
+  load without error, not how they look. SVG, PDF and HTML open as they are, without the viewer.
+- The viewer's buttons work while `serve.pl` runs: it exits after 10 minutes with no request, and a
+  button then says so; click the link again.
+- Clicking an image that Tern itself draws (an inline image in an agent chat, a file block's preview)
+  reaches this plugin only when Tern routes it as a file open of a remote path; not exercised.
 - Tern runs plugin code from the window, so the plugin must be installed on each Mac you attach from.
 - **Stop forwards** ends the local ssh. The remote `sleep` of a timed (OAuth) forward is not signalled
   (no tty) and lingers on the remote host until its ten minutes are up; it holds nothing.
@@ -150,8 +179,8 @@ references to other files on the remote host do not resolve.
 nix shell nixpkgs#luau nixpkgs#luau-lsp     # or the release binaries (see .github/workflows/ci.yml)
 just types      # tern.d.luau from your Tern (or the published SDK)
 just check      # luau-lsp analyze, strict
-just test       # 160 unit tests with a stubbed `tern`, plus 39 checks of serve.pl
-just neuter     # breaks the code 85 + 8 ways, one at a time; every one must turn the tests red
+just test       # 177 unit tests with a stubbed `tern`, plus 78 checks of serve.pl
+just neuter     # breaks the code 96 + 16 ways, one at a time; every one must turn the tests red
 ```
 
 Layout: `window.luau` is thin glue; `lib/` holds pure helpers (`url`, `check`, `hosts`, `target`,

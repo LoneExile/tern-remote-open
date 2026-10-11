@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0
+
+- Image viewer: an image (`png jpg jpeg gif webp`) from a remote pane opens in a small page
+  with **Copy image** (the macOS clipboard, as PNG and TIFF) and **Save to Downloads**
+  (`~/Downloads`, never overwriting a file) buttons. Click the image for actual size.
+  `serve.pl` carries out both on the Mac (`copy-image.js` through `osascript`), only for a
+  `POST` carrying `X-Remote-Open: 1` from its own origin.
+- An image path printed in a remote pane (no `file://`) opens in the same viewer, through a
+  `tern.route.open` handler that takes only clicks (origin `link`) on a connected remote host.
+- SVG, PDF and HTML are served as before, without the viewer.
+
 ## 0.1.0
 
 First release.

@@ -31,4 +31,15 @@ h.test("eligible: only a connected remote host", function()
 	h.falsy(hosts.eligible(nil))
 end)
 
+h.test("host_named: the one host of that exact name; none, or two of it, is no host", function()
+	local a = host("devbox", "remote", "connected", {})
+	local b = host("other", "remote", "connected", {})
+	h.eq(hosts.host_named({ a, b }, "devbox"), a)
+	h.eq(hosts.host_named({ a, b }, "other"), b)
+	h.eq(hosts.host_named({ a, b }, "Devbox"), nil, "exact, not case-folded")
+	h.eq(hosts.host_named({ a, b }, "nope"), nil)
+	h.eq(hosts.host_named({ a, host("devbox", "remote", "connected", {}) }, "devbox"), nil, "ambiguous")
+	h.eq(hosts.host_named({}, "devbox"), nil)
+end)
+
 return {}

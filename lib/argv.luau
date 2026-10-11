@@ -15,6 +15,7 @@ argv.OPEN = "/usr/bin/open"
 argv.FIND = "/usr/bin/find"
 argv.PERL = "/usr/bin/perl"
 argv.UUIDGEN = "/usr/bin/uuidgen"
+argv.OSASCRIPT = "/usr/bin/osascript"
 
 -- Options on every ssh/scp the plugin starts: no prompts, and a host key that
 -- is not already trusted is a failure, never a question.
@@ -157,11 +158,26 @@ function argv.uuidgen(): { string }
 	return { argv.UUIDGEN }
 end
 
+-- The image viewer's Copy command, without its last argument (the file, which
+-- `serve.pl` appends): copy-image.js run by osascript as JavaScript.
+function argv.copier(script: string): { string }
+	need_path(script, "copier script")
+	return { argv.OSASCRIPT, "-l", "JavaScript", script }
+end
+
 -- The content types `serve.pl` may send. Anything else is refused.
 argv.CONTENT_TYPES = {
 	["text/html; charset=utf-8"] = true,
 	["image/svg+xml"] = true,
 	["application/pdf"] = true,
+	["image/png"] = true,
+	["image/jpeg"] = true,
+	["image/gif"] = true,
+	["image/webp"] = true,
+}
+
+-- The content types `serve.pl` shows in its image viewer.
+argv.VIEWER_TYPES = {
 	["image/png"] = true,
 	["image/jpeg"] = true,
 	["image/gif"] = true,
@@ -176,10 +192,14 @@ export type Serve = {
 	name: string,
 	content_type: string,
 	idle: number,
+	-- The image viewer: where Save puts a copy, and the Copy command (see
+	-- `argv.copier`). Both or neither.
+	downloads: string?,
+	copier: { string }?,
 }
 
 -- `serve.pl` serving `file` at /TOKEN/NAME on 127.0.0.1:PORT until it has been
--- idle for `idle` seconds.
+-- idle for `idle` seconds; with `downloads` and `copier`, the image viewer.
 function argv.serve(s: Serve): { string }
 	need_path(s.script, "script path")
 	need_path(s.file, "file path")
@@ -199,7 +219,7 @@ function argv.serve(s: Serve): { string }
 	if s.idle ~= math.floor(s.idle) or s.idle < 1 or s.idle > 86400 then
 		error("invalid idle time")
 	end
-	return {
+	local out = {
 		argv.PERL,
 		s.script,
 		string.format("%d", port),
@@ -209,6 +229,29 @@ function argv.serve(s: Serve): { string }
 		s.content_type,
 		string.format("%d", s.idle),
 	}
+	local downloads, copier = s.downloads, s.copier
+	if downloads == nil and copier == nil then
+		return out
+	end
+	if downloads == nil or copier == nil then
+		error("the viewer needs both a downloads directory and a copier")
+	end
+	if not argv.VIEWER_TYPES[s.content_type] then
+		error("no viewer for " .. s.content_type)
+	end
+	need_path(downloads, "downloads directory")
+	if #copier == 0 then
+		error("empty copier")
+	end
+	need_path(copier[1], "copier")
+	table.insert(out, downloads)
+	for _, a in copier do
+		if a == "" or string.find(a, "%c") then
+			error("invalid copier argument")
+		end
+		table.insert(out, a)
+	end
+	return out
 end
 
 return argv
