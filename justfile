@@ -24,3 +24,11 @@ test:
 neuter:
     python3 scripts/neuter.py
     python3 scripts/neuter_serve.py
+
+# The GitHub release body for VERSION: its CHANGELOG.md section plus install steps.
+release-notes version:
+    scripts/release-notes.sh {{version}}
+
+# The release archive for VERSION from HEAD: dist/remote-open-VERSION.tar.gz and its .sha256.
+package version:
+    scripts/package.sh {{version}}

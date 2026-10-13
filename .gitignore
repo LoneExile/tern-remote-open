@@ -6,3 +6,5 @@ cm/
 config.json
 kv.json
 .DS_Store
+# Built by `just package`; published as release assets, never committed.
+dist/

@@ -1,0 +1,40 @@
+name: release
+
+# Pushing a tag vX.Y.Z publishes the GitHub release for it: the whole CI gate
+# first, then the archive of the plugin and notes taken from CHANGELOG.md.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both fail before anything is published: no CHANGELOG.md section for the
+      # version, or a plugin.toml version that is not the tag's.
+      - name: Release notes from CHANGELOG.md
+        run: scripts/release-notes.sh "$TAG" > "$RUNNER_TEMP/notes.md"
+
+      - name: Package
+        run: scripts/package.sh "$TAG"
+
+      - name: Publish
+        run: |
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "Remote Open ${TAG#v}" \
+            --notes-file "$RUNNER_TEMP/notes.md"

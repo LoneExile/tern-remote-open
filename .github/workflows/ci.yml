@@ -3,6 +3,8 @@ name: ci
 on:
   push:
   pull_request:
+  # The release workflow runs the whole gate before it publishes.
+  workflow_call:
 
 permissions:
   contents: read
