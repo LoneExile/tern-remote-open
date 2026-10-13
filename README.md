@@ -145,6 +145,21 @@ every click, so a change needs no reload.
 
 ## Troubleshooting
 
+### Nothing happens at all
+
+If a ⌘-click shows no Remote Open toast and the palette has no **Remote Open** commands, Tern may
+have switched the plugin off while loading it. Tern gives a plugin 50 ms to load, and a very busy
+Mac (for example during a Home Manager switch) can go past that. Check Tern's log:
+
+```sh
+grep remote-open ~/Library/Logs/Tern/tern.log | tail -3   # "load exceeded 50 ms" means this happened
+```
+
+Run **Reload plugins** from the command palette, or restart Tern. `tern plugin list` still says
+`ready` in this case: it reports the session daemon, not the window.
+
+### Messages
+
 | Message | What to do |
 | --- | --- |
 | **No SSH target for devbox** | The host's address is not a plain `user@host`. Add it under `hosts` in [Settings](#settings). Tern then handles the link as usual. |
@@ -158,13 +173,20 @@ every click, so a change needs no reload.
 | **devbox is not connected** | Render in browser fetches a remote file over ssh; reconnect the host in Tern first. |
 | **Cannot tell which machine holds this file** | Tern did not list the file's block under any host. Please [open an issue](https://github.com/LoneExile/tern-remote-open/issues) with your Tern version. |
 
-Anything Remote Open does not handle is left to Tern, so when in doubt, hold ⌥ and click.
+Anything Remote Open does not handle is left to Tern, so when in doubt, hold ⌥ and click. (An image
+path printed without `file://` is the exception: it always opens in the viewer.)
 
 ## Limitations
 
 - macOS only. The remote host can be anything with an SSH server.
-- A page is one file: images, scripts or styles it loads from other files on the remote host do not
-  appear.
+- A page is one file: images, fonts, scripts or styles it loads from other files on the remote host
+  do not appear (this applies to Render in browser too). For such a page, serve its **folder** on the
+  remote host and ⌘-click the localhost link, which Remote Open forwards:
+
+  ```sh
+  npx http-server ~/site -p 8080        # the folder, not the .html file
+  echo http://127.0.0.1:8080/page.html  # ⌘-click this
+  ```
 - The viewer's buttons work for 10 minutes after the last use; after that they say so, and clicking
   the link again brings them back.
 - A sign-in URL that your terminal wraps over several rows may reach Tern cut short.
