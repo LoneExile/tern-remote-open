@@ -268,6 +268,9 @@ local function act(ctx: Ctx, cfg: config.Config, plan: classify.Plan, cx: Window
 	elseif plan.kind == "file" then
 		start_file(ctx, plan, cx)
 		return { handled = true }
+	elseif plan.kind == "show" then
+		open_copy(ctx, cx, plan.path or "", plan.name or "file", plan.ext or "")
+		return { handled = true }
 	else
 		start_forward(ctx, cfg, plan, cx)
 		return { handled = true }
@@ -282,6 +285,14 @@ end
 local function on_open(ctx: Ctx, req: OpenRequest, cx: WindowCx): RouteDecision?
 	local cfg = app.load_config(ctx.t)
 	return act(ctx, cfg, classify.plan_open(req, cx.hosts:list(), cfg), cx)
+end
+
+-- Render in browser: the page in the focused file block, in Tern's browser block.
+local function render(ctx: Ctx, cx: WindowCx)
+	local pane = cx.session:focused()
+	local info = if pane ~= nil then cx.session:pane(pane) else nil
+	local cfg = app.load_config(ctx.t)
+	act(ctx, cfg, classify.plan_render(info, cx.hosts:list(), cfg), cx)
 end
 
 local function describe(listing: forward.Listing, now: number): string
@@ -326,7 +337,7 @@ local function stop_forwards(ctx: Ctx, cx: WindowCx)
 	end)
 end
 
--- Registers the plugin on `t`: the link and open routes, the two commands, and
+-- Registers the plugin on `t`: the link and open routes, the three commands, and
 -- the load-time housekeeping (forget dead forwards, age out old cached copies).
 function app.install(t: Tern)
 	local ctx: Ctx = { t = t, env = app.make_env(t) }
@@ -350,6 +361,17 @@ function app.install(t: Tern)
 		title = "Remote Open: Stop forwards",
 		run = function(cx: WindowCx)
 			stop_forwards(ctx, cx)
+		end,
+	})
+	t.command({
+		id = "render",
+		title = "Remote Open: Render in browser",
+		available = function(cx: WindowCx): boolean
+			local pane = cx.session:focused()
+			return pane ~= nil and classify.renderable(cx.session:pane(pane))
+		end,
+		run = function(cx: WindowCx)
+			render(ctx, cx)
 		end,
 	})
 

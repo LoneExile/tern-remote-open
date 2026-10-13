@@ -1,6 +1,7 @@
 --!strict
--- Deciding what a link click means. Pure: takes the link, the host list and the
--- config, returns a plan. All effects happen in app.luau.
+-- Deciding what a link click, a file open or a Render in browser means. Pure:
+-- takes the request, the host list and the config, returns a plan. All effects
+-- happen in app.luau.
 
 local check = require("./check")
 local config = require("./config")
@@ -24,11 +25,11 @@ export type Link = {
 }
 
 export type Plan = {
-	kind: "pass" | "no_target" | "refuse" | "file" | "local" | "oauth",
+	kind: "pass" | "no_target" | "refuse" | "file" | "show" | "local" | "oauth",
 	-- The Tern host's display name, cleaned for a toast.
 	host_name: string?,
 	target: string?,
-	-- file
+	-- file (fetched with scp, then shown), show (a file on the Mac, shown where it is)
 	path: string?,
 	name: string?,
 	cache_name: string?,
@@ -47,6 +48,10 @@ export type Plan = {
 }
 
 local PASS: Plan = { kind = "pass" }
+
+-- Extensions Render in browser shows: pages. Tern's file block already has a
+-- view of its own for images, SVG and PDF.
+classify.RENDER = { html = true, htm = true }
 
 local function extension(path: string): string
 	local name = string.match(path, "([^/]*)$") or ""
@@ -174,6 +179,50 @@ function classify.plan_open(req: OpenRequest, host_list: { ManagedHost }, cfg: c
 		return { kind = "no_target", host_name = text.clean(host.name, 60) }
 	end
 	return file_plan(host, target, req.path)
+end
+
+-- Whether `info` (a pane from `cx.session:pane`) is a file block showing a page
+-- Render in browser can show.
+function classify.renderable(info: PaneInfo?): boolean
+	return info ~= nil
+		and info.kind == "file"
+		and info.path ~= nil
+		and classify.RENDER[extension(info.path)] == true
+end
+
+local function refuse(title: string, detail: string?, host_name: string?): Plan
+	return { kind = "refuse", title = title, detail = detail, host_name = host_name }
+end
+
+-- Render in browser on the focused pane `info`: a page in a file block of a
+-- connected remote host is fetched as a clicked `file://` link to it is; a page
+-- on the Mac is served where it is. Anything else is refused with a reason (a
+-- command has no built-in to fall back to).
+function classify.plan_render(info: PaneInfo?, host_list: { ManagedHost }, cfg: config.Config): Plan
+	if info == nil or not classify.renderable(info) then
+		return refuse("Not an HTML file", "Focus an .html file, then run Render in browser")
+	end
+	local path = info.path or ""
+	if not check.abs_path(path) then
+		return refuse("Cannot render this file", "Its path is not absolute")
+	end
+	local host = hostlib.host_for_pane(host_list, info.pane)
+	if host == nil then
+		return refuse("Cannot tell which machine holds this file")
+	end
+	if host.kind == "local" then
+		local base = string.match(path, "([^/]*)$") or "file"
+		return { kind = "show", path = path, name = text.safe_name(base, MAX_NAME), ext = extension(path) }
+	end
+	local host_name = text.clean(host.name, 60)
+	if not hostlib.eligible(host) then
+		return refuse(host_name .. " is not connected", "Render in browser fetches the file over ssh", host_name)
+	end
+	local target = targetlib.choose(host, cfg)
+	if target == nil then
+		return { kind = "no_target", host_name = host_name }
+	end
+	return file_plan(host, target, path)
 end
 
 return classify

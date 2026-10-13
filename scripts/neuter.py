@@ -198,6 +198,23 @@ MUTATIONS = [
     ("open-eligible", "lib/classify.luau", "if not host or not hostlib.eligible(host) then", "if not host then"),
     ("hosts-named-ambiguous", "lib/hosts.luau", "if found ~= nil then\n\t\t\t\treturn nil", "if false then\n\t\t\t\treturn nil"),
     ("app-open-route", "lib/app.luau", "return on_open(ctx, req, cx)", "return nil"),
+    # --- render in browser ----------------------------------------------------
+    ("render-ext", "lib/classify.luau",
+     "classify.RENDER = { html = true, htm = true }",
+     "classify.RENDER = { html = true, htm = true, md = true, svg = true }"),
+    ("render-kind", "lib/classify.luau", '\t\tand info.kind == "file"\n', ""),
+    ("render-abs", "lib/classify.luau", "if not check.abs_path(path) then", "if false then"),
+    ("render-membership", "lib/classify.luau",
+     "\tlocal host = hostlib.host_for_pane(host_list, info.pane)\n",
+     "\tlocal host = hostlib.host_for_pane(host_list, info.pane) or host_list[1]\n"),
+    ("render-local", "lib/classify.luau", 'if host.kind == "local" then', "if false then"),
+    ("render-eligible", "lib/classify.luau", "if not hostlib.eligible(host) then", "if false then"),
+    ("app-render-show", "lib/app.luau",
+     'open_copy(ctx, cx, plan.path or "", plan.name or "file", plan.ext or "")\n', ""),
+    ("app-render-available", "lib/app.luau",
+     "return pane ~= nil and classify.renderable(cx.session:pane(pane))", "return true"),
+    ("app-render-focused", "lib/app.luau",
+     "local info = if pane ~= nil then cx.session:pane(pane) else nil", "local info = nil"),
 ]
 
 

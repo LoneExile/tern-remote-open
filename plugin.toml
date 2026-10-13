@@ -1,6 +1,6 @@
 schema = 1
 id = "remote-open"
 name = "Remote Open"
-version = "0.2.0"
-description = "Open remote files, localhost links and OAuth loopback sign-ins from remote panes, over ssh; copy or save remote images."
+version = "0.3.0"
+description = "Open remote files, localhost links and OAuth loopback sign-ins from remote panes, over ssh; copy or save remote images; render an HTML file block in the browser block."
 window = "window.luau"

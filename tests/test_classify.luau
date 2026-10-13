@@ -241,4 +241,47 @@ h.test("open: no usable ssh target gives no_target", function()
 	h.eq(p.host_name, "devbox")
 end)
 
+local function render(path, hosts, kind, c)
+	local info = { pane = 41, kind = kind or "file", path = path, title = "x", cwd = "" }
+	return classify.plan_render(info, hosts or { fakes.host() }, c or DEFAULT)
+end
+
+h.test("render: a page in a file block of a connected remote host is the same file plan as its file:// link", function()
+	for _, name in { "a.html", "a.htm", "INDEX.HTML" } do
+		local path = "/home/you/out/" .. name
+		local p = render(path)
+		h.eq(p, plan("file://" .. path), name)
+		h.eq(p.kind, "file", name)
+	end
+end)
+
+h.test("render: a page on the Mac is shown where it is, under a cleaned name", function()
+	local p = render("/Users/you/My Page.html", { fakes.host({ kind = "local", name = "you", address = false }) })
+	h.eq(p, { kind = "show", path = "/Users/you/My Page.html", name = "My_Page.html", ext = "html" })
+end)
+
+h.test("render: anything but a page in a file block is refused", function()
+	for _, name in { "a.svg", "a.pdf", "a.png", "a.md", "a", "a.html.bak" } do
+		h.eq(render("/home/you/" .. name).kind, "refuse", name)
+	end
+	h.eq(render("/home/you/a.html", nil, "git").kind, "refuse", "git block")
+	h.eq(classify.plan_render(nil, { fakes.host() }, DEFAULT).kind, "refuse", "no focus")
+	h.eq(render("home/you/a.html").title, "Cannot render this file", "relative path")
+	h.eq(render("/home/you/a\n.html").title, "Cannot render this file", "control character")
+end)
+
+h.test("render: the file's machine is the host listing its pane, never a fallback", function()
+	local other = fakes.host({ id = 2, name = "other", address = "you@other", panes = { 7 } })
+	h.eq(render("/home/you/a.html", { other }).title, "Cannot tell which machine holds this file")
+	local p = render("/home/you/a.html", { other, fakes.host() })
+	h.eq(p.target, "you@devbox")
+end)
+
+h.test("render: a remote host that is not connected is refused, naming it; no ssh target gives no_target", function()
+	local p = render("/home/you/a.html", { fakes.host({ state = "stalled" }) })
+	h.eq(p.kind, "refuse")
+	h.eq(p.title, "devbox is not connected")
+	h.eq(render("/home/you/a.html", { fakes.host({ address = "you@devbox:8376" }) }).kind, "no_target")
+end)
+
 return {}

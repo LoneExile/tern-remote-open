@@ -127,6 +127,15 @@ local function setup(opts)
 				return s.hosts
 			end,
 		}
+		-- The focused pane and the panes it can look up: `opts.focused`, `opts.panes`.
+		cx.session = {
+			focused = function()
+				return opts.focused
+			end,
+			pane = function(_, id)
+				return (opts.panes or {})[id]
+			end,
+		}
 		function cx.toast(_, level, title, sub)
 			table.insert(s.toasts, { level = level, title = title, sub = sub })
 		end
@@ -156,6 +165,11 @@ local function setup(opts)
 			how = "default",
 			origin = oopts.origin or "link",
 		}, s.new_cx())
+	end
+
+	-- Runs Render in browser on the focused pane.
+	function s.render()
+		s.commands.render.run(s.new_cx())
 	end
 
 	-- Answers every pending process and timer until quiet. `responses` maps a
@@ -215,12 +229,13 @@ end
 local FREE = { status = 1, stdout = "", stderr = "", timed_out = false }
 local DEAD = { status = 255, stdout = "", stderr = "no master", timed_out = false }
 
-h.test("install registers a link route, an open route and the two commands, and touches no process on an empty state", function()
+h.test("install registers a link route, an open route and the three commands, and touches no process on an empty state", function()
 	local s = setup()
 	h.truthy(s.link, "route.link handler")
 	h.truthy(s.open, "route.open handler")
 	h.eq(s.commands.stop.title, "Remote Open: Stop forwards")
 	h.eq(s.commands.list.title, "Remote Open: List forwards")
+	h.eq(s.commands.render.title, "Remote Open: Render in browser")
 	h.eq(#s.procs, 0)
 end)
 
@@ -425,6 +440,90 @@ h.test("open: no usable ssh target is a toast, then Tern's own open", function()
 	h.eq(s.toasts[1].level, "error")
 	h.eq(s.toasts[1].title, "No SSH target for devbox")
 	h.eq(#s.procs, 0)
+end)
+
+-- A file block showing `path`, as `cx.session:pane` describes it.
+local function file_pane(path, pane)
+	return { pane = pane or 41, kind = "file", path = path, title = "x", cwd = "" }
+end
+
+h.test("render: an HTML file of a remote host is fetched and shown, as a clicked file:// link is", function()
+	local path = "/home/you/.answer-me-with-html/pages/report.html"
+	local s = setup({ focused = 41, panes = { [41] = file_pane(path) } })
+	s.render()
+	h.eq(s.toasts[1].title, "Fetching report.html…")
+	local plan = classify.plan(fakes.link("file://" .. path), s.hosts, { hosts = {} })
+	local dest = "/data/cache/" .. plan.cache_name
+	h.eq(s.procs[1].argv, argv.scp("you@devbox", path, dest))
+	s.drain()
+	h.eq(s.kinds(), { "scp", "uuidgen", "serve", "nc" })
+	h.eq(s.ran[3][5], dest, "the fetched copy is served")
+	h.eq(s.ran[3][7], "text/html; charset=utf-8")
+	h.eq(s.opened, { serve.url(tonumber(s.ran[3][3]), TOKEN, "report.html") })
+end)
+
+h.test("render: an HTML file on the Mac is served where it is, with no copy", function()
+	local path = "/Users/you/site/My Page.htm"
+	local s = setup({
+		hosts = { fakes.host({ id = 0, name = "you", kind = "local", address = false, panes = { 41 } }) },
+		focused = 41,
+		panes = { [41] = file_pane(path) },
+	})
+	s.render()
+	s.drain()
+	h.eq(s.kinds(), { "uuidgen", "serve", "nc" })
+	h.eq(s.ran[2][5], path)
+	h.eq(s.opened, { serve.url(tonumber(s.ran[2][3]), TOKEN, "My_Page.htm") })
+	h.eq(#s.toasts, 0)
+end)
+
+h.test("render: other files, other blocks and no focus are refused with a toast and start nothing", function()
+	local cases = {
+		{ focused = 41, panes = { [41] = file_pane("/home/you/notes.md") } },
+		{ focused = 41, panes = { [41] = file_pane("/home/you/logo.svg") } },
+		{ focused = 41, panes = { [41] = { pane = 41, kind = "git", path = "/home/you/site.html", title = "g", cwd = "" } } },
+		{ focused = 41, panes = { [41] = { pane = 41, kind = "terminal", title = "zsh", cwd = "/home/you" } } },
+		{ focused = nil, panes = {} },
+	}
+	for i, c in cases do
+		local s = setup(c)
+		s.render()
+		s.drain()
+		h.eq(#s.toasts, 1, "case " .. i)
+		h.eq(s.toasts[1].level, "error", "case " .. i)
+		h.eq(s.toasts[1].title, "Not an HTML file", "case " .. i)
+		h.eq(#s.ran, 0, "case " .. i)
+		h.eq(#s.opened, 0, "case " .. i)
+	end
+end)
+
+h.test("render: a disconnected host, an unlisted pane and no ssh target are each a toast and start nothing", function()
+	local html = { [41] = file_pane("/home/you/a.html") }
+	local cases = {
+		{ hosts = { fakes.host({ state = "reconnecting" }) }, title = "devbox is not connected" },
+		{ hosts = { fakes.host({ panes = { 7 } }) }, title = "Cannot tell which machine holds this file" },
+		{ hosts = { fakes.host({ address = "you@devbox:8376" }) }, title = "No SSH target for devbox" },
+	}
+	for _, c in cases do
+		local s = setup({ hosts = c.hosts, focused = 41, panes = html })
+		s.render()
+		s.drain()
+		h.eq(s.toasts[1].level, "error", c.title)
+		h.eq(s.toasts[1].title, c.title)
+		h.eq(#s.ran, 0, c.title)
+		h.eq(#s.opened, 0, c.title)
+	end
+end)
+
+h.test("render: the command shows in the palette only on an HTML file block", function()
+	local function shown(opts)
+		local s = setup(opts)
+		return s.commands.render.available(s.new_cx())
+	end
+	h.eq(shown({ focused = 41, panes = { [41] = file_pane("/home/you/INDEX.HTML") } }), true)
+	h.eq(shown({ focused = 41, panes = { [41] = file_pane("/home/you/notes.md") } }), false)
+	h.eq(shown({ focused = 41, panes = { [41] = { pane = 41, kind = "browser", url = "http://x/a.html", title = "b", cwd = "" } } }), false)
+	h.eq(shown({ focused = nil }), false)
 end)
 
 h.test("local: forward, wait for the port, then Tern opens the link", function()

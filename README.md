@@ -28,9 +28,30 @@ In the image viewer:
   names the file.
 - Click the image to switch between fit-to-window and actual size.
 
-Palette commands: **Remote Open: List forwards**, **Remote Open: Stop forwards**.
+Palette commands: **Remote Open: List forwards**, **Remote Open: Stop forwards**, and
+**Remote Open: Render in browser**.
 
 It is a window-only plugin: nothing is installed on the remote host.
+
+## Render in browser
+
+Tern's file block shows an `.html` file as source. **Remote Open: Render in browser** shows the
+page in the focused file block (`html`, `htm`) in Tern's browser block instead, and leaves the file
+block open for editing:
+
+- a file of a connected remote host is copied with `scp` and shown, as a clicked `file://` link to
+  it is;
+- a file on the Mac is served where it is, with no copy.
+
+The palette lists the command only while an HTML file block has focus. It has no default key; bind
+its action in Tern's `settings.json`:
+
+```json
+{ "keybinds": { "ctrl+a>v": "plugin.remote-open.render" } }
+```
+
+It shows the file as saved on disk: save first to see an edit. Each run starts a new preview, in a
+new browser block.
 
 ## Install
 
@@ -92,7 +113,9 @@ click, so edits need no reload.
   only a click (origin `link`) on an image path of a connected remote host; it never sees the
   palette, the Files pane, drops, `tern open` or the system. Both only classify and start work; every
   slow step (scp, ssh, port probes) runs in a process callback, so a handler stays far under Tern's
-  50 ms budget.
+  50 ms budget. **Render in browser** is a command, not a route: a file block opened from the Files
+  pane stays a file block, and the page opens only when you ask. The file's machine is the host whose
+  pane list holds the focused block; no host is a fallback.
 - **Forwards.** `ssh -f -T -M -S <control dir>/<port>.sock -L 127.0.0.1:PORT:<localhost>:PORT …`.
   The ssh process is also a ControlMaster on that socket. The socket is how the plugin later asks
   "is it alive?" (`-O check`) and ends exactly that process (`-O exit`). No process is ever matched by

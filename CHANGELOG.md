@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0
+
+- **Remote Open: Render in browser**: a palette command that shows the page in the focused file
+  block (`html`, `htm`) in Tern's browser block, and leaves the file block open for editing. A file
+  of a connected remote host is copied with `scp`, as a clicked `file://` link is; a file on the Mac
+  is served where it is. The palette lists it only while an HTML file block has focus; it has no
+  default key (bind action `plugin.remote-open.render`).
+
 ## 0.2.0
 
 - Image viewer: an image (`png jpg jpeg gif webp`) from a remote pane opens in a small page
